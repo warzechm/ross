@@ -1,0 +1,330 @@
+# This will be my first approach to modelling a simple shaft supported by two sliding bearings.
+# I want to test the capabilities of the ROSS library.
+
+import ross as rs
+from ross.materials import steel
+import numpy as np
+import math
+import plotly.graph_objects as go
+from ross.bearings.fluid_flow import FluidFlow
+from ross.bearings.fluid_flow_graphics import (plot_pressure_surface, plot_pressure_theta,
+    plot_eccentricity, plot_pressure_theta_cylindrical)
+from ross.bearings.fluid_flow_coefficients import (
+    calculate_oil_film_force,
+    calculate_stiffness_and_damping_coefficients)
+from ross.bearings import fluid_flow as flow
+from ross.bearings.fluid_flow_geometry import (
+    sommerfeld_number,
+    modified_sommerfeld_number,
+)
+from ross.bearings.fluid_flow_geometry import internal_radius_function
+
+# Make sure the default renderer is set to 'notebook' for inline plots in Jupyter
+import plotly.io as pio
+
+pio.renderers.default = "browser"
+
+def shaft_with_two_sliding_bearings():
+    """Check possibility to time simulate the orbit in the bearing.
+    """
+    steel = rs.Material.load_material('Steel')
+    shaft_half = rs.ShaftElement(L=0.5, material=steel, idl=0, odl=0.02)
+    shaft_elements = [shaft_half, shaft_half]
+    bearing = rs.BearingFluidFlow(
+        n=0,
+        nz=30,
+        ntheta=20,
+        length=0.03,
+        omega=np.linspace(1, 5000, 5),
+        p_in=0,
+        p_out=0,
+        radius_rotor=0.0199,
+        radius_stator=0.02,
+        visc=0.1,
+        rho=860.0,
+        load=525,
+    )
+    bearing_copy = rs.BearingElement(
+        n=2,
+        frequency=bearing.frequency,
+        kxx=bearing.kxx,
+        kxy=bearing.kxy,
+        kyx=bearing.kyx,
+        kyy=bearing.kyy,
+        cxx=bearing.cxx,
+        cxy=bearing.cxy,
+        cyx=bearing.cyx,
+        cyy=bearing.cyy,
+    )
+
+    bearing_elements = [bearing, bearing_copy]
+
+    rotor = rs.Rotor(
+        shaft_elements=shaft_elements,
+        bearing_elements=bearing_elements
+    )
+
+    speed = 600.0
+    time_samples = 1001
+    node = 3
+    t = np.linspace(0, 0.5, time_samples)
+    
+    F = np.zeros((time_samples, rotor.ndof))
+    
+    # component on direction
+    F[:, 4 * node + 0] = 100
+    # component on direction y
+    F[:, 4 * node + 1] = 100
+    
+    response = rotor.run_time_response(speed, F, t)
+    fig = response.plot_2d(node=0)
+    fig.show()
+    fig = rotor.plot_rotor()
+    fig.show()
+
+
+def pressure_distribution_plot():
+    nz = 8
+    ntheta = 128 # 64
+    length = 0.03
+    omega = 157.1 # 100.*2*np.pi/60
+    p_in = 0.
+    p_out = 0.
+    radius_rotor = 0.04
+    radius_stator = 0.05
+    viscosity = 0.1
+    density = 860.
+    eccentricity = 0.005
+    attitude_angle = 0
+    load = 525 # 100
+    # remove attitude_angle and eccentricity; replace it by load
+    bearing_pressure_distribution = FluidFlow(nz, ntheta, length,
+                                              omega, p_in, p_out, radius_rotor,
+                                              radius_stator, viscosity, density,
+                                              attitude_angle=attitude_angle,
+                                              eccentricity=eccentricity)
+    fig = plot_pressure_surface(bearing_pressure_distribution)
+    fig.show()
+    fig = plot_pressure_theta(bearing_pressure_distribution, z=int(nz/2))
+    fig.show()
+    fig = plot_eccentricity(bearing_pressure_distribution)
+    fig.show()
+    fig = plot_pressure_theta_cylindrical(bearing_pressure_distribution, z=int(nz/2))
+    fig.show()
+    radial_force, tangential_force, force_x, force_y = calculate_oil_film_force(bearing_pressure_distribution)
+    print("N=", radial_force)
+    print("T=", tangential_force)
+    print("fx=", force_x)
+    print("fy=", force_y)
+
+def hydrodynamic_journal_bearing_example_9():
+    # Instantiating a Pressure Matrix
+    nz = 8
+    ntheta = 128
+    length = 0.03
+    omega = 157.1
+    p_in = 0.0
+    p_out = 0.0
+    radius_rotor = 0.0499
+    radius_stator = 0.05
+    load = 525
+    visc = 0.1
+    rho = 860.0
+    my_fluid_flow = flow.FluidFlow(
+        nz,
+        ntheta,
+        length,
+        omega,
+        p_in,
+        p_out,
+        radius_rotor,
+        radius_stator,
+        visc,
+        rho,
+        load=load,
+    )
+    # Getting the eccentricity
+    print(my_fluid_flow.eccentricity)
+    # Calculating the modified sommerfeld number and the sommerfeld number
+    
+    modified_s = modified_sommerfeld_number(
+	my_fluid_flow.radius_stator,
+	my_fluid_flow.omega,
+	my_fluid_flow.viscosity,
+	my_fluid_flow.length,
+	my_fluid_flow.load,
+	my_fluid_flow.radial_clearance,
+    )
+    print(sommerfeld_number(modified_s, my_fluid_flow.radius_stator, my_fluid_flow.length))
+
+    # Plotting the eccentricity
+    fig = plot_eccentricity(my_fluid_flow, scale_factor=0.5)
+    fig.show()
+
+    # Getting the stiffness and damping matrices
+    K, C = calculate_stiffness_and_damping_coefficients(my_fluid_flow)
+    print(f"Kxx, Kxy, Kyx, Kyy = {K}")
+    print(f"Cxx, Cxy, Cyx, Cyy = {C}")
+
+    # Calculating pressure matrix
+    print(my_fluid_flow.calculate_pressure_matrix_numerical()[int(nz / 2)])
+    # Plotting pressure along theta in a chosen z
+    fig = plot_pressure_theta(my_fluid_flow, z=int(nz / 2))
+    fig.show()
+
+
+def test_internal_radius_function():
+    gamma = np.arange(0, 2*np.pi, 0.1)
+    radius_rotor = 0.01
+    smallest_radius = radius_rotor
+    smallest_radius_gamma = 0
+    attitude_angle = np.pi/2
+    eccentricity = 0.001
+    for i in gamma:
+        (radius, xri, yri) = internal_radius_function(i, attitude_angle, radius_rotor, eccentricity)
+        if radius < smallest_radius:
+            smallest_radius = radius
+            smallest_radius_gamma = i
+        print(f"For angle gamma = {i}, the radius = {radius}.")
+        if (np.pi / 2 + attitude_angle) < i < (3 * np.pi / 2 + attitude_angle):
+            alpha = np.absolute(3 * np.pi / 2 - i + attitude_angle)
+        else:
+            alpha = i + np.pi / 2 - attitude_angle
+        print(f"For angle gamma = {i}, the angle alfa is equal to {alpha}. \n")
+    print(f"The smallest radius is equal {smallest_radius} and it occurs for gamma \
+    {smallest_radius_gamma}")
+
+def shift_grooves_from_teta_to_gamma(grooves : tuple, fluid_flow : FluidFlow) -> tuple:
+    """ The teta angle is measured counterclockwise starting from -X axis.
+    The fluid flow is calculated using gamma angle, therefore the grooves positions have to be adjusted.
+
+    Parameters
+    ----------
+    grooves : tuple of tuples
+        Angle coordinates of all grooves given in teta angle
+    fluid_flow : FluidFlow
+        FluidFlow object to get the sift between teta and gamma.
+
+    Returns
+    -------
+    tuple
+        Angle coordinates of all grooves given in gamma angle.
+    
+    Notes
+    -----
+    None.
+
+    Examples
+    --------
+    To be added if necessary. 
+    """
+    shift_value = (np.pi / 2) + fluid_flow.attitude_angle
+    return tuple((math.radians(start + shift_value), math.radians(end + shift_value)) for start, end in grooves)
+
+
+def check_if_angle_inside_groove(grooves : tuple, angle : float) -> bool:
+    """ The teta angle is measured counterclockwise starting from -X axis.
+    The fluid flow is calculated using gamma angle, therefore the grooves positions have to be adjusted.
+
+    Parameters
+    ----------
+    grooves : tuple of tuples
+        Angle coordinates of all grooves given in gamma angle.
+    angle : float
+        Value of gamma angle
+
+    Returns
+    -------
+    bool
+        True if angle is inside the groove.
+    
+    Notes
+    -----
+    None.
+
+    Examples
+    --------
+    To be added if necessary. 
+    """
+    for start, end in grooves:
+        if start <= end:
+            if start <= angle <= end:
+                return True
+        else:
+            if angle >= start or angle <= end:
+                return True
+    return False
+
+def set_zero_pressure_in_grooves(grooves : tuple, fluid_flow : FluidFlow) -> FluidFlow:
+    """ Set 0 pressure in grooves and return new FluidFlow object
+
+    Parameters
+    ----------
+    grooves : tuple of tuples
+        Angle coordinates of all grooves given in teta angle.
+    fluid_flow : FluidFlow
+        FluidFlow object storing pressure data
+
+    Returns
+    -------
+    FluidFlow
+        New object with change pressure profile.
+    
+    Notes
+    -----
+    None.
+
+    Examples
+    --------
+    To be added if necessary. 
+    """
+    grooves_in_gamma = shift_grooves_from_teta_to_gamma(grooves, fluid_flow)
+    for i in range(0, fluid_flow.ntheta):
+        if check_if_angle_inside_groove(grooves_in_gamma, fluid_flow.gama[0,i]):
+            print(f"Current angle is equal {fluid_flow.gama[0,1]} and the check results in it beeing in groove.")
+            for j in range(0, fluid_flow.nz):
+                fluid_flow.p_mat_numerical[j, i] = 0
+    return fluid_flow
+
+
+def test_pressure_in_grooves():
+    grooves = ((355, 5), (85, 95), (175, 185), (265, 275))
+    nz = 8
+    ntheta = 128
+    length = 0.03
+    omega = 157.1
+    p_in = 0.0
+    p_out = 0.0
+    radius_rotor = 0.0499
+    radius_stator = 0.05
+    load = 525
+    visc = 0.1
+    rho = 860.0
+    my_fluid_flow = flow.FluidFlow(
+        nz,
+        ntheta,
+        length,
+        omega,
+        p_in,
+        p_out,
+        radius_rotor,
+        radius_stator,
+        visc,
+        rho,
+        load=load,
+    )
+    print(my_fluid_flow.calculate_pressure_matrix_numerical())
+    new_flow = set_zero_pressure_in_grooves(grooves, my_fluid_flow);
+    fig = plot_pressure_surface(my_fluid_flow)
+    fig.show()
+    fig = plot_pressure_theta(my_fluid_flow, z=int(nz / 2))
+    fig.show()
+
+    
+
+if __name__ == "__main__":
+#    hydrodynamic_journal_bearing_example_9()
+    # pressure_distribution_plot()
+    # test_internal_radius_function()
+    test_pressure_in_grooves()
+    
