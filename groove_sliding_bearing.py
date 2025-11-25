@@ -219,7 +219,7 @@ def shift_grooves_from_teta_to_gamma(grooves : tuple, fluid_flow : FluidFlow) ->
     To be added if necessary. 
     """
     shift_value = (np.pi / 2) + fluid_flow.attitude_angle
-    return tuple((math.radians(start + shift_value), math.radians(end + shift_value)) for start, end in grooves)
+    return tuple((math.radians(start) + shift_value, math.radians(end) + shift_value) for start, end in grooves)
 
 
 def check_if_angle_inside_groove(grooves : tuple, angle : float) -> bool:
@@ -279,9 +279,10 @@ def set_zero_pressure_in_grooves(grooves : tuple, fluid_flow : FluidFlow) -> Flu
     To be added if necessary. 
     """
     grooves_in_gamma = shift_grooves_from_teta_to_gamma(grooves, fluid_flow)
+    print(grooves_in_gamma)
     for i in range(0, fluid_flow.ntheta):
         if check_if_angle_inside_groove(grooves_in_gamma, fluid_flow.gama[0,i]):
-            print(f"Current angle is equal {fluid_flow.gama[0,1]} and the check results in it beeing in groove.")
+            print(f"Current angle is equal {fluid_flow.gama[0,i]} and the check results in it beeing in groove.")
             for j in range(0, fluid_flow.nz):
                 fluid_flow.p_mat_numerical[j, i] = 0
     return fluid_flow
@@ -295,11 +296,13 @@ def test_pressure_in_grooves():
     omega = 157.1
     p_in = 0.0
     p_out = 0.0
+    eccentricity = (0.05-0.0499)/4
     radius_rotor = 0.0499
     radius_stator = 0.05
     load = 525
     visc = 0.1
     rho = 860.0
+    attitude_angle = np.pi*2
     my_fluid_flow = flow.FluidFlow(
         nz,
         ntheta,
@@ -311,13 +314,28 @@ def test_pressure_in_grooves():
         radius_stator,
         visc,
         rho,
+        eccentricity=eccentricity,
+        attitude_angle = attitude_angle,
         load=load,
     )
-    print(my_fluid_flow.calculate_pressure_matrix_numerical())
+    radial_force, tangential_force, force_x, force_y = calculate_oil_film_force(my_fluid_flow)
+    print("Forces before groove influence: \n")
+    print("N=", radial_force)
+    print("T=", tangential_force)
+    print("fx=", force_x)
+    print("fy=", force_y)
     new_flow = set_zero_pressure_in_grooves(grooves, my_fluid_flow);
+    radial_force, tangential_force, force_x, force_y = calculate_oil_film_force(new_flow)
+    print("Forces after groove influence: \n")
+    print("N=", radial_force)
+    print("T=", tangential_force)
+    print("fx=", force_x)
+    print("fy=", force_y)
     fig = plot_pressure_surface(my_fluid_flow)
     fig.show()
     fig = plot_pressure_theta(my_fluid_flow, z=int(nz / 2))
+    fig.show()
+    fig = plot_eccentricity(my_fluid_flow);
     fig.show()
 
     
