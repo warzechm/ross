@@ -18,11 +18,19 @@ from ross.bearings.fluid_flow_geometry import (
     modified_sommerfeld_number,
 )
 from ross.bearings.fluid_flow_geometry import internal_radius_function
+import matplotlib.pyplot as mpt
+from scipy.integrate import ode
 
 # Make sure the default renderer is set to 'notebook' for inline plots in Jupyter
 import plotly.io as pio
 
 pio.renderers.default = "browser"
+
+# GLOBAL VARIABLES
+force_x_cached = 0
+force_y_cached = 0
+last_force_t = 0
+dt_force = 0.00001
 
 def shaft_with_two_sliding_bearings():
     """Check possibility to time simulate the orbit in the bearing.
@@ -279,10 +287,10 @@ def set_zero_pressure_in_grooves(grooves : tuple, fluid_flow : FluidFlow) -> Flu
     To be added if necessary. 
     """
     grooves_in_gamma = shift_grooves_from_teta_to_gamma(grooves, fluid_flow)
-    print(grooves_in_gamma)
+    #print(grooves_in_gamma)
     for i in range(0, fluid_flow.ntheta):
         if check_if_angle_inside_groove(grooves_in_gamma, fluid_flow.gama[0,i]):
-            print(f"Current angle is equal {fluid_flow.gama[0,i]} and the check results in it beeing in groove.")
+            #print(f"Current angle is equal {fluid_flow.gama[0,i]} and the check results in it beeing in groove.")
             for j in range(0, fluid_flow.nz):
                 fluid_flow.p_mat_numerical[j, i] = 0
     return fluid_flow
@@ -338,11 +346,181 @@ def test_pressure_in_grooves():
     fig = plot_eccentricity(my_fluid_flow);
     fig.show()
 
+
+def calculate_attitude_angle_from_shaft_position(x : float, y : float) -> float:
+    """ The attitude angle is defined by line connecting centre of shaft and sleeve. Because the
+    sleeve centre is used as the centre of global coordinate system (always (0, 0)) the function
+    takes position of the shaft centre and based on it calculates the angle, which is measured from
+    negative Y axis.
+
+    Parameters
+    ----------
+    x : float
+        X coordinate of the shaft centre
+    y : float
+        Y coordinate of the shaft centre
+
+    Returns
+    -------
+    float
+        Attitude angle given in radians.
+
+    Notes
+    -----
+
+    Examples
+    --------
+    To be added if neccessary.
+    """
+    if x == 0 and y == 0:
+        return 0
+    if x == 0 and y < 0:
+        return 0
+    if x == 0 and y > 0:
+        return np.pi
+    tangens_of_attitude_agle = y / x
+    if x > 0 and y < 0:
+        return -math.atan(tangens_of_attitude_agle)
+    if x > 0 and y > 0:
+        return math.atan(tangens_of_attitude_agle) + math.pi/2
+    if x < 0 and y > 0:
+        return math.atan(tangens_of_attitude_agle) + 3/2*math.pi
+    if x < 0 and y < 0:
+        return -math.atan(tangens_of_attitude_agle) + 2*math.pi
     
+
+def rhs(t : float, x : np.array) -> np.array:
+    """ Function defines system of differential equations to be solved by ODE integrator.
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+
+    Notes
+    -----
+
+    Examples
+    --------
+    To be added if neccessary
+    """
+    global force_x_cached
+    global force_y_cached
+    global last_force_t
+    global dt_force
+    load = 100  # this parameter may cause problems, as it is included in motion equation
+    m = 2.47  # [kg], D = 0.02 m, length = 1 m, ro = 7850 kg/m^3
+    if True: #(t - last_force_t) >= dt_force:
+        omega = 20 * 2 * math.pi   # 20 Hz
+        grooves = ((355, 5), (85, 95), (175, 185), (265, 275))
+        nz = 8
+        ntheta = 128
+        length = 0.08
+        p_in = 0.0
+        p_out = 0.0
+        print(f"{x[0]}, {x[2]}")
+        eccentricity = math.sqrt(x[0]**2 + x[2]**2)
+        print(eccentricity)
+        radius_rotor = 0.0499
+        radius_stator = 0.05
+        visc = 0.1
+        rho = 860.0
+        attitude_angle = calculate_attitude_angle_from_shaft_position(x[0], x[2])
+        my_fluid_flow = flow.FluidFlow(
+            nz,
+            ntheta,
+            length,
+            omega,
+            p_in,
+            p_out,
+            radius_rotor,
+            radius_stator,
+            visc,
+            rho,
+            eccentricity=eccentricity,
+            attitude_angle = attitude_angle,
+            load=load,
+        )
+        flow_with_grooves = set_zero_pressure_in_grooves(grooves, my_fluid_flow);
+        print("Evaluate oil film parameters\n")
+        radial_force, tangential_force, force_x, force_y = calculate_oil_film_force(flow_with_grooves)
+        force_x_cached = force_x
+        force_y_cached = force_y
+        last_force_t = t
+        print(f"Updated forces [{force_x}, {force_y}] at time {t}\n")
+    x0_dot = x[1]
+    x1_dot = (force_x_cached - load) / m
+    x2_dot = x[3]
+    x3_dot = force_y_cached / m
+    return np.array([x0_dot, x1_dot, x2_dot, x3_dot])
+
+
+def solve_ODE(func : callable, init_cond : np.array,
+              time_steps : np.array, problem_size : int)  -> np.array:
+    """ Takes system of ODE's and solves it for given initial conditions and time steps.
+    Main computational cost.
+
+    Parameters
+    ----------
+    func : callable
+        Function which implements the system of differential equations.
+    init_cond : np.array
+        Array containing initial conditions of the system. Size of the array is determined by problem
+        size. Both have to correspond to each other.
+    time_steps : np.array
+        Array containing time steps at which the system state will be obtained (it is mainly important
+        from user perspecitve, as it determines the precision of obtained results. The integration
+        allgorithm may subdived the steps, but only internally.
+    problem_size : int
+        Number determining problem size (or in other words unknowns)
+    
+    Returns
+    -------
+    np.array
+        Array containing values of uknowns at each time step defined by function input
+        array time_steps.
+    
+    Notes
+    -----
+
+    Examples
+    --------
+    To be added if neccessary.
+    """
+    # generate matrix for results
+    x_all = np.zeros((time_steps.shape[0], problem_size))
+    eq = ode(func)
+    
+    eq.set_integrator('dopri5', nsteps=1000)
+    eq.set_initial_value(init_cond, 0)
+
+    for i, t in enumerate(time_steps):
+        if not eq.successful():
+            print(f"Integrator fail at time {eq.t}")
+            break
+        x = eq.integrate(t)
+        for j in range(problem_size):
+            x_all[i][j] = x[j]
+        print(f"Current time step is equal to {t}")
+
+    return x_all
+
 
 if __name__ == "__main__":
 #    hydrodynamic_journal_bearing_example_9()
     # pressure_distribution_plot()
     # test_internal_radius_function()
-    test_pressure_in_grooves()
+#    test_pressure_in_grooves()
+    init_cond = np.array([0, 0, 0, 0])
+    time_discretisation = 100*dt_force  #  [s]
+    simulation_time = 1  #  [s]
+    t = np.arange(time_discretisation, simulation_time, time_discretisation) 
+    results = solve_ODE(rhs, init_cond, t, 4)
+    fig = mpt.figure()
+    axes = mpt.subplot()
+    axes.plot(results[:, 0], results[: 2])
+    mpt.show()
+    
+    
     
