@@ -4,8 +4,8 @@ from math import isnan
 import numpy as np
 from scipy import integrate
 from scipy.optimize import least_squares
-
 from ross.bearings.fluid_flow_geometry import move_rotor_center, move_rotor_center_abs
+from ross.bearings.fluid_flow_graphics import plot_pressure_surface
 
 
 def calculate_oil_film_force(fluid_flow_object, force_type=None):
@@ -207,7 +207,6 @@ def calculate_stiffness_and_damping_coefficients(fluid_flow_object):
             force_xx[i],
             force_yx[i],
         ] = calculate_oil_film_force(fluid_flow_object, force_type="numerical")
-
         delta_y = fluid_flow_object.yp * np.sin(
             fluid_flow_object.omegap * fluid_flow_object.t
         )
