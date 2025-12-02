@@ -31,7 +31,7 @@ pio.renderers.default = "browser"
 force_x_cached = 0
 force_y_cached = 0
 last_force_t = 0
-dt_force = 0.00005
+dt_force = 0.0001
 K = [0, 0, 0, 0]
 C = [0, 0, 0, 0]
 last_eccentricity = 0
@@ -544,7 +544,7 @@ def rhs(t : float, x : np.array) -> np.array:
     global force_y_cached
     global last_force_t
     global dt_force
-    load = 100  # this parameter may cause problems, as it is included in motion equation
+    load = -77  # this parameter may cause problems, as it is included in motion equation
     m = 2.47  # [kg], D = 0.02 m, length = 1 m, ro = 7850 kg/m^3
     if True: #(t - last_force_t) >= dt_force:
         omega = 20 * 2 * math.pi   # 20 Hz
@@ -585,7 +585,7 @@ def rhs(t : float, x : np.array) -> np.array:
         last_force_t = t
         print(f"Updated forces [{force_x}, {force_y}] at time {t}\n")
     x0_dot = x[1]
-    x1_dot = (force_x_cached - load) / m
+    x1_dot = (force_x_cached + load) / m
     x2_dot = x[3]
     x3_dot = force_y_cached / m
     return np.array([x0_dot, x1_dot, x2_dot, x3_dot])
@@ -612,57 +612,50 @@ def rhs2(t : float, x : np.array) -> np.array:
     global last_force_t
     global dt_force
     global last_eccentricity
-    load = 100  # this parameter may cause problems, as it is included in motion equation
+    load = -10  # this parameter may cause problems, as it is included in motion equation, was 77
     m = 2.47  # [kg], D = 0.02 m, length = 1 m, ro = 7850 kg/m^3
     if (t - last_force_t) >= dt_force:
-        omega = 20 * 2 * math.pi   # 20 Hz
-        grooves = ((351.4, 8.6), (36.4, 53.6), (81.4, 98.6), (126.4, 143.6),
-               (171.4, 188.6), (216.4, 233.6), (261.4, 278.6), (306.4, 323.6))
-        nz = 8
-        ntheta = 128
-        length = 0.08
-        p_in = 0.0
-        p_out = 0.0
+        eccentricity = math.sqrt(x[0]**2 + x[2]**2)
         radius_rotor = 0.0499
         radius_stator = 0.05
-        visc = 0.89e-3
-        rho = 997.0
-        eccentricity = math.sqrt(x[0]**2 + x[2]**2)
-        eccentricity_to_big = False
-        if eccentricity > (radius_stator - radius_rotor):
-            x[0] = x[0] / eccentricity * (radius_stator - radius_rotor)
-            x[2] = x[2] / eccentricity * (radius_stator - radius_rotor)
-            eccentricity = last_eccentricity
-            eccentricity_to_big = True
-            print("Eccentricity limited to maximum. Increase stiffness 5 times.")
-        attitude_angle = calculate_attitude_angle_from_shaft_position(x[0], x[2])
-        my_fluid_flow = flow.FluidFlow(
-            nz,
-            ntheta,
-            length,
-            omega,
-            p_in,
-            p_out,
-            radius_rotor,
-            radius_stator,
-            visc,
-            rho,
-            eccentricity=eccentricity,
-            attitude_angle = attitude_angle,
-            load=load,
-        )
-        K, C = calculate_stiffness_and_damping_coefficients_for_flow_with_grooves(grooves, my_fluid_flow)
-        if eccentricity_to_big:
-            K = [5 * x for x in K]
+        if eccentricity > 0.95*(radius_stator - radius_rotor):
+            print("Contact between shaft and bearing. Use material data for stiffness")
+            K = [-68.7e6 for x in K]
+        else:
+            omega = 20 * 2 * math.pi   # 20 Hz
+            grooves = ((351.4, 8.6), (36.4, 53.6), (81.4, 98.6), (126.4, 143.6),
+                       (171.4, 188.6), (216.4, 233.6), (261.4, 278.6), (306.4, 323.6))
+            nz = 8
+            ntheta = 128
+            length = 0.08
+            p_in = 0.0
+            p_out = 0.0
+            visc = 0.89e-3
+            rho = 997.0
+            attitude_angle = calculate_attitude_angle_from_shaft_position(x[0], x[2])
+            my_fluid_flow = flow.FluidFlow(
+                nz,
+                ntheta,
+                length,
+                omega,
+                p_in,
+                p_out,
+                radius_rotor,
+                radius_stator,
+                visc,
+                rho,
+                eccentricity=eccentricity,
+                attitude_angle = attitude_angle)
+            K, C = calculate_stiffness_and_damping_coefficients_for_flow_with_grooves(grooves, my_fluid_flow)
         last_force_t = t
         last_eccentricity = eccentricity
         print("Evaluate oil film parameters\n")
-        print(f"Updated stiffness and damping at time {t}\n")
+        print(f"Updated stiffness and damping at time {t}. K_xx = {K[0]}, C_xx = {C[0]}\n")
         
     x0_dot = x[1]
-    x1_dot = (-x[0]*K[0] - x[2]*K[1] - x[1]*C[0] - x[3]*C[1] - load) / m
+    x1_dot = (x[0]*K[0] + x[2]*K[1] - x[1]*C[0] - x[3]*C[1] + load) / m
     x2_dot = x[3]
-    x3_dot = (-x[0]*K[2] - x[2]*K[3] - x[1]*C[2] - x[3]*C[3]) / m
+    x3_dot = (x[0]*K[2] + x[2]*K[3] - x[1]*C[2] - x[3]*C[3]) / m
     return np.array([x0_dot, x1_dot, x2_dot, x3_dot])
 
 
@@ -727,7 +720,7 @@ if __name__ == "__main__":
     time_discretisation = dt_force  #  [s]
     simulation_time = 1  #  [s]
     t = np.arange(time_discretisation, simulation_time, time_discretisation) 
-    results = solve_ODE(rhs2, init_cond, t, 4)
+    results = solve_ODE(rhs, init_cond, t, 4)
     fig = mpt.figure()
     axes = mpt.subplot()
     axes.plot(results[:, 0], results[:, 2])
