@@ -11,7 +11,8 @@ from ross.bearings.fluid_flow_graphics import (plot_pressure_surface, plot_press
     plot_eccentricity, plot_pressure_theta_cylindrical)
 from ross.bearings.fluid_flow_coefficients import (
     calculate_oil_film_force,
-    calculate_stiffness_and_damping_coefficients)
+    calculate_stiffness_and_damping_coefficients,
+    find_equilibrium_position)
 from ross.bearings import fluid_flow as flow
 from ross.bearings.fluid_flow_geometry import (
     sommerfeld_number,
@@ -21,6 +22,7 @@ from ross.bearings.fluid_flow_geometry import internal_radius_function
 import matplotlib.pyplot as mpt
 from scipy.integrate import ode
 from ross.bearings.fluid_flow_geometry import move_rotor_center, move_rotor_center_abs
+from scipy.optimize import least_squares
 
 # Make sure the default renderer is set to 'notebook' for inline plots in Jupyter
 import plotly.io as pio
@@ -35,6 +37,9 @@ dt_force = 0.0001
 K = [0, 0, 0, 0]
 C = [0, 0, 0, 0]
 last_eccentricity = 0
+x_equilibrium = 0
+y_equilibrium = 0
+initialized_stiffness_and_damping = False
 
 def shaft_with_two_sliding_bearings():
     """Check possibility to time simulate the orbit in the bearing.
@@ -185,6 +190,42 @@ def hydrodynamic_journal_bearing_example_9():
     fig.show()
 
 
+def rotate_grooves(grooves : tuple, angle : float) -> tuple:
+    """ It is experimental function. It will create fluid flow object with the same parameters as used
+    for simulation of water bearing and then calculate equilibrium point for this parameters. I am
+    currently interested, if this point will allow the shaft to be inside the bearing clearance.
+
+    Parameters
+    ----------
+    grooves : tuple
+        A tuple of tuples containing to angles defining grooves in the bearing.
+    angle : float
+        Angle given in degrees defining how much rotate the grooves. Rotation takes place counterclockwise.
+
+    Returns
+    -------
+    Tuple
+        Tuple of tuples with positions of rotated grooves.
+    
+    Notes
+    -----
+    To be added.
+    
+    Examples
+    --------
+    To be added if necessary.
+    """
+    new_groove_positions = []
+    for (a, b) in grooves:
+        a += angle
+        if a > 360:
+            a -= 360
+        if b > 360:
+            b -= 360
+        b += angle
+        new_groove_positions.append((a, b))
+    return tuple(new_groove_positions)
+    
 def test_internal_radius_function():
     gamma = np.arange(0, 2*np.pi, 0.1)
     radius_rotor = 0.01
@@ -205,6 +246,7 @@ def test_internal_radius_function():
         print(f"For angle gamma = {i}, the angle alfa is equal to {alpha}. \n")
     print(f"The smallest radius is equal {smallest_radius} and it occurs for gamma \
     {smallest_radius_gamma}")
+
 
 def shift_grooves_from_teta_to_gamma(grooves : tuple, fluid_flow : FluidFlow) -> tuple:
     """ The teta angle is measured counterclockwise starting from -X axis.
@@ -419,6 +461,85 @@ def calculate_stiffness_and_damping_coefficients_for_flow_with_grooves(grooves :
     return K, C
 
 
+def find_equilibrium_position_with_grooves(fluid_flow_object : FluidFlow, grooves : tuple, print_equilibrium_position=False) -> None:
+    """This function finds the equilibrium position of the rotor such that the fluid flow
+    forces match the applied load.
+    Parameters
+    ----------
+    fluid_flow_object: A FluidFlow object.
+    print_equilibrium_position: bool, optional
+        If True, prints the equilibrium position.
+    Returns
+    -------
+    None
+    --------
+    >>> from ross.bearings.fluid_flow import fluid_flow_example2
+    >>> my_fluid_flow = fluid_flow_example2()
+    >>> find_equilibrium_position(my_fluid_flow)
+    >>> (my_fluid_flow.xi, my_fluid_flow.yi) # doctest: +ELLIPSIS
+    (2.2...
+    """
+
+    def residuals(x, *args):
+        """Calculates x component of the forces of the oil film and the
+        difference between the y component and the load.
+        Parameters
+        ----------
+        x: array
+            Rotor center coordinates
+        *args : dict
+            Dictionary instantiating the ross.bearing class.
+        Returns
+        -------
+        array
+            Array with the x component of the forces of the oil film and the difference
+            between the y component and the load.
+        """
+        bearing = args[0]
+        move_rotor_center_abs(
+            bearing,
+            x[0] * fluid_flow_object.radial_clearance,
+            x[1] * fluid_flow_object.radial_clearance,
+        )
+        bearing.geometry_description()
+        bearing.calculate_pressure_matrix_numerical()
+        bearing = set_zero_pressure_in_grooves(grooves, bearing);
+        (_, _, fx, fy) = calculate_oil_film_force(bearing, force_type="numerical")
+        return np.array([fx, (fy - bearing.load)])
+
+    if fluid_flow_object.load is None:
+        sys.exit("Load must be given to calculate the equilibrium position.")
+    x0 = np.array(
+        [
+            0 * fluid_flow_object.radial_clearance,
+            -1e-3 * fluid_flow_object.radial_clearance,
+        ]
+    )
+    move_rotor_center_abs(fluid_flow_object, x0[0], x0[1])
+    fluid_flow_object.geometry_description()
+    fluid_flow_object.calculate_pressure_matrix_numerical()
+    fluid_flow_object = set_zero_pressure_in_grooves(grooves, fluid_flow_object)
+    (_, _, fx, fy) = calculate_oil_film_force(fluid_flow_object, force_type="numerical")
+    result = least_squares(
+        residuals, x0, args=[fluid_flow_object], jac="3-point", bounds=([0, -1], [1, 0])
+    )
+    move_rotor_center_abs(
+        fluid_flow_object,
+        result.x[0] * fluid_flow_object.radial_clearance,
+        result.x[1] * fluid_flow_object.radial_clearance,
+    )
+    fluid_flow_object.geometry_description()
+    if print_equilibrium_position is True:
+        print(
+            "The equilibrium position (x0, y0) is: ",
+            result.x[0] * fluid_flow_object.radial_clearance,
+            ",",
+            result.x[1] * fluid_flow_object.radial_clearance,
+            ")",
+        )
+
+
+
 def test_pressure_in_grooves():
     # 8 grooves, each 17.2 deg in angular width 0, 45, 90, 135, 180, 225, 270, 315
     grooves = ((351.4, 8.6), (36.4, 53.6), (81.4, 98.6), (126.4, 143.6),
@@ -612,10 +733,14 @@ def rhs2(t : float, x : np.array) -> np.array:
     global last_force_t
     global dt_force
     global last_eccentricity
-    load = -10  # this parameter may cause problems, as it is included in motion equation, was 77
+    global x_equilibrium
+    global y_equilibrium
+    load = -77  # this parameter may cause problems, as it is included in motion equation, was 77
     m = 2.47  # [kg], D = 0.02 m, length = 1 m, ro = 7850 kg/m^3
     if (t - last_force_t) >= dt_force:
         eccentricity = math.sqrt(x[0]**2 + x[2]**2)
+        x_equilibrium = x[0]
+        y_equilibrium = x[2]
         radius_rotor = 0.0499
         radius_stator = 0.05
         if eccentricity > 0.95*(radius_stator - radius_rotor):
@@ -645,7 +770,7 @@ def rhs2(t : float, x : np.array) -> np.array:
                 visc,
                 rho,
                 eccentricity=eccentricity,
-                attitude_angle = attitude_angle)
+                attitude_angle=attitude_angle)
             K, C = calculate_stiffness_and_damping_coefficients_for_flow_with_grooves(grooves, my_fluid_flow)
         last_force_t = t
         last_eccentricity = eccentricity
@@ -653,10 +778,73 @@ def rhs2(t : float, x : np.array) -> np.array:
         print(f"Updated stiffness and damping at time {t}. K_xx = {K[0]}, C_xx = {C[0]}\n")
         
     x0_dot = x[1]
-    x1_dot = (x[0]*K[0] + x[2]*K[1] - x[1]*C[0] - x[3]*C[1] + load) / m
+    x1_dot = ((x[0] - x_equilibrium)*K[0] + (x[2] - y_equilibrium)*K[1] - x[1]*C[0] - x[3]*C[1] + load) / m
     x2_dot = x[3]
-    x3_dot = (x[0]*K[2] + x[2]*K[3] - x[1]*C[2] - x[3]*C[3]) / m
+    x3_dot = ((x[0] - x_equilibrium)*K[2] + (x[2] - y_equilibrium)*K[3] - x[1]*C[2] - x[3]*C[3]) / m
+    stiffness_force_on_x = (x[0] - x_equilibrium)*K[0] + (x[2] - y_equilibrium)*K[1]
+    print(f'Stiffness force acting on x axis {stiffness_force_on_x}')
     return np.array([x0_dot, x1_dot, x2_dot, x3_dot])
+
+
+def rhs3(t : float, x : np.array) -> np.array:
+    """ Function defines system of differential equations to be solved by ODE integrator.
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+
+    Notes
+    -----
+
+    Examples
+    --------
+    To be added if neccessary
+    """
+    global initialized_stiffness_and_damping
+    global K, C
+    load = 77  # this parameter may cause problems, as it is included in motion equation, was 77
+    m = 2.47 + 1.7  # [kg], D = 0.02 m, length = 1 m, ro = 7850 kg/m^3
+    omega = 30 * 2 * math.pi   # 20 Hz
+    if not initialized_stiffness_and_damping:
+        radius_rotor = 0.0499
+        radius_stator = 0.05
+        grooves = ((351.4, 8.6), (36.4, 53.6), (81.4, 98.6), (126.4, 143.6),
+                   (171.4, 188.6), (216.4, 233.6), (261.4, 278.6), (306.4, 323.6))
+        grooves = rotate_grooves(grooves, 6)
+        nz = 8
+        ntheta = 128
+        length = 0.08
+        p_in = 0.0
+        p_out = 0.0
+        visc = 0.89e-3
+        rho = 997.0
+        my_fluid_flow = flow.FluidFlow(
+            nz,
+            ntheta,
+            length,
+            omega,
+            p_in,
+            p_out,
+            radius_rotor,
+            radius_stator,
+            visc,
+            rho,
+            load=load)
+        find_equilibrium_position_with_grooves(my_fluid_flow, grooves, True)
+        K, C = calculate_stiffness_and_damping_coefficients_for_flow_with_grooves(grooves, my_fluid_flow)
+        #find_equilibrium_position(my_fluid_flow, True)
+        #K, C = calculate_stiffness_and_damping_coefficients(my_fluid_flow)
+        initialized_stiffness_and_damping = True
+    e = math.sqrt(x[0]**2 + x[2]**2)  #  eccentricity from equilibrium point
+    last_eccentricity = e
+    x0_dot = x[1]
+    x1_dot = (-x[0]*K[0] - x[2]*K[1] - x[1]*C[0] - x[3]*C[1]) / m + 10 * e * omega**2 * math.cos(omega * t)
+    x2_dot = x[3]
+    x3_dot = (-x[0]*K[2] - x[2]*K[3] - x[1]*C[2] - x[3]*C[3]) / m + 10 * e * omega**2 * math.sin(omega * t) - 9.81
+    return np.array([x0_dot, x1_dot, x2_dot, x3_dot])
+
 
 
 def solve_ODE(func : callable, init_cond : np.array,
@@ -711,6 +899,73 @@ def solve_ODE(func : callable, init_cond : np.array,
     return x_all
 
 
+def check_equilibrium_point():
+    """ It is experimental function. It will create fluid flow object with the same parameters as used
+    for simulation of water bearing and then calculate equilibrium point for this parameters. I am
+    currently interested, if this point will allow the shaft to be inside the bearing clearance.
+
+    Parameters
+    ----------
+    None
+        Function does not take any parameters. It has all values defined inside.
+
+    Returns
+    -------
+    None
+        Only equilibrium position will be printed (coordinates, eccentricity and attitude angle)
+    
+    Notes
+    -----
+    To be added.
+    
+    Examples
+    --------
+    To be added if necessary.
+    """
+    load = 77
+    radius_rotor = 0.0499
+    radius_stator = 0.05
+    omega = 30 * 2 * math.pi   # 20 Hz
+    grooves = ((351.4, 8.6), (36.4, 53.6), (81.4, 98.6), (126.4, 143.6),
+               (171.4, 188.6), (216.4, 233.6), (261.4, 278.6), (306.4, 323.6))
+    grooves = rotate_grooves(grooves, 6)
+    nz = 8
+    ntheta = 128
+    length = 0.08
+    p_in = 0.0
+    p_out = 0.0
+    visc = 0.89e-3
+    rho = 997.0
+    my_fluid_flow = flow.FluidFlow(
+        nz,
+        ntheta,
+        length,
+        omega,
+        p_in,
+        p_out,
+        radius_rotor,
+        radius_stator,
+        visc,
+        rho,
+        load=load)
+    print('Bearing parameter in equilibrium state:\n')
+    print(f'Coordinates of the shaft centre: [{my_fluid_flow.xi}, {my_fluid_flow.yi}]\n')
+    print(f'Eccentricity: {my_fluid_flow.eccentricity}, attitude angle: {my_fluid_flow.attitude_angle}\n')
+    radial_force, tangential_force, force_x, force_y = calculate_oil_film_force(my_fluid_flow)
+    print(f"Updated forces [{force_x}, {force_y}]\n")
+    K, C = calculate_stiffness_and_damping_coefficients(my_fluid_flow)
+    print(f"Stiffness: k_xx = {K[0]}, k_xy = {K[1]}, k_yx = {K[2]}, k_yy = {K[3]}")
+    print(f"Damping: c_xx = {C[0]}, c_xy = {C[1]}, c_yx = {C[2]}, c_yy = {C[3]}")
+    print("Values calculated for bearing with grooves: ")
+    find_equilibrium_position_with_grooves(my_fluid_flow, grooves, True)
+    radial_force, tangential_force, force_x, force_y = calculate_oil_film_force(my_fluid_flow)
+    print(f'Eccentricity: {my_fluid_flow.eccentricity}, attitude angle: {my_fluid_flow.attitude_angle}\n')
+    print(f"Updated forces [{force_x}, {force_y}]\n")
+    K, C = calculate_stiffness_and_damping_coefficients_for_flow_with_grooves(grooves, my_fluid_flow)
+    print(f"Stiffness: k_xx = {K[0]}, k_xy = {K[1]}, k_yx = {K[2]}, k_yy = {K[3]}")
+    print(f"Damping: c_xx = {C[0]}, c_xy = {C[1]}, c_yx = {C[2]}, c_yy = {C[3]}")
+
+
 if __name__ == "__main__":
 #    hydrodynamic_journal_bearing_example_9()
     # pressure_distribution_plot()
@@ -720,9 +975,14 @@ if __name__ == "__main__":
     time_discretisation = dt_force  #  [s]
     simulation_time = 1  #  [s]
     t = np.arange(time_discretisation, simulation_time, time_discretisation) 
-    results = solve_ODE(rhs, init_cond, t, 4)
+    results = solve_ODE(rhs3, init_cond, t, 4)
     fig = mpt.figure()
     axes = mpt.subplot()
     axes.plot(results[:, 0], results[:, 2])
+    np.savetxt("results_30Hz_6deg_77N.txt", results)
     mpt.show()
+    check_equilibrium_point()
+    grooves = ((351.4, 8.6), (36.4, 53.6), (81.4, 98.6), (126.4, 143.6),
+               (171.4, 188.6), (216.4, 233.6), (261.4, 278.6), (306.4, 323.6))
+    print(rotate_grooves(grooves, 6))
     
