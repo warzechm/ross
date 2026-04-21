@@ -24,6 +24,7 @@ import plotly.io as pio
 import ross as rs
 from ross.bearings import fluid_flow as flow
 from ross.bearings.fluid_flow_coefficients import calculate_stiffness_and_damping_coefficients
+from ross.bearings.fluid_flow_coefficients import find_equilibrium_position
 from ross.bearings.fluid_flow_geometry import calculate_attitude_angle
 from matplotlib.patches import Circle
 
@@ -58,7 +59,7 @@ p_out = 0.0
 visc = 0.89e-3
 rho = 997.0
 load = 35.35  # N
-rpm = 3000.0
+rpm = 2800.0
 omega = rpm * 2*np.pi/60  # [rad/s]
 fluid_film = flow.FluidFlow(nz=nz,
                             ntheta=ntheta,
@@ -71,7 +72,10 @@ fluid_film = flow.FluidFlow(nz=nz,
                             viscosity=visc,
                             density=rho,
                             load=load)
+find_equilibrium_position(fluid_film, True)
 K_journal_bearing, C_journal_bearing = calculate_stiffness_and_damping_coefficients(fluid_film)
+
+
 journal_bearing = rs.BearingElement(n=2,
                                     kxx=K_journal_bearing[0],
                                     kxy=K_journal_bearing[1],
@@ -84,23 +88,23 @@ journal_bearing = rs.BearingElement(n=2,
                                     tag="journal bearing")
 
 # element of coupling (disk)
-coupling = rs.DiskElement(n=3, m=1.7, Id=0.00109, Ip=0.0018323, tag="coupling")
+coupling = rs.DiskElement(n=3, m=1.7, Id=0.001401842, Ip=0.00165659, tag="coupling")
 
 # rotor creation
 rotor = rs.Rotor(shaft_elements=shaft,
                  disk_elements=[coupling],
                  bearing_elements=[ball_bearing, journal_bearing])
 
-#print(rotor.nodes_pos)
-#fig_rotor= rotor.plot_rotor()
-#fig_rotor.write_html("rotor_geometry.html", auto_open=True)
+print(rotor.nodes_pos)
+fig_rotor= rotor.plot_rotor()
+fig_rotor.write_html("rotor_geometry.html", auto_open=True)
 
 # unbalance response
 # Unbalance magnitude is m*e in kg*m.
 # Conversion: (g*mm) -> (kg*m) multiply by 1e-6
 # Example: 500 g*mm = 5e-4 kg*m
 unb_node = 3
-unb_magnitude = 4e-4   # [kg*m]  <-- adjust
+unb_magnitude = 3e-4   # [kg*m]  <-- adjust
 unb_phase = 0.0        # [rad]
 
 # run at a single frequency = omega (rad/s)
@@ -113,8 +117,8 @@ results = rotor.run_unbalance_response(
     freq                     # frequency
 )
 
-#plot = results.plot_deflected_shape_3d(omega)
-#plot.show()
+plot = results.plot_deflected_shape_3d(omega)
+plot.show()
 # Complex displacement response array: (ndof, nfreq)
 U = results.forced_resp
 
@@ -139,7 +143,8 @@ y_t = np.real(Y * ejwt)
 
 #Plot orbit (ellipse)
 fig, ax = plt.subplots()
-ax.plot(x_t, y_t)
+#ax.plot(x_t, y_t)
+ax.plot(t, x_t)
 # --- add circle ---
 r_circle = 0.0001  # example: 50 micrometers
 circle = Circle((0.0, 0.0), r_circle, fill=False, linewidth=2)  # center at (0,0)
@@ -149,7 +154,11 @@ ax.set_xlabel("x displacement [m]")
 ax.set_ylabel("y displacement [m]")
 ax.set_title(f"Journal node orbit at {rpm} rpm (unbalance excitation)")
 ax.grid(True)
-ax.set_aspect("equal", adjustable="box")  # prevents visual distortion
+#ax.set_aspect("equal", adjustable="box")  # prevents visual distortion
 plt.show()
+
+# Save results to .txt file
+results = np.column_stack((t, x_t, y_t))
+np.savetxt('simulation_results_2800_rpm_3_e-4_kg*m.txt', results)
 
 
