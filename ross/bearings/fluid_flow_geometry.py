@@ -80,6 +80,9 @@ def external_radius_function(
     preload=None,
     displacement=None,
     max_depth=None,
+    grooves=None,
+    groove_depth=0,
+    print_info=False,
 ):
     """This function returns the x and y of the radius of the stator, as well as its distance from the
     origin, given the distance in the theta-axis and the radius of the bearing.
@@ -171,12 +174,39 @@ def external_radius_function(
         radius_external = radius_stator + d_theta
         xre = radius_external * np.cos(gama)
         yre = radius_external * np.sin(gama)
+        
+    elif shape == "grooves":
+        if grooves is None:
+            raise ValueError("Grooves positions are not defined.")
+        print("Adding grooves to geometry")
+        angle_inside_groove = False
+        for (i, j) in grooves:
+            if i <= j:
+                if gama >= i and gama <= j:
+                    angle_inside_groove = True
+                    break
+            else:
+                if gama >= i or gama <= j:
+                    angle_inside_groove = True
+                    break
+        if angle_inside_groove:
+            radius_external = radius_stator + groove_depth
+            xre = radius_external * np.cos(gama)
+            yre = radius_external * np.sin(gama)
+        else:
+            radius_external = radius_stator
+            xre = radius_external * np.cos(gama)
+            yre = radius_external * np.sin(gama)
+        
 
     else:
         radius_external = radius_stator
         xre = radius_external * np.cos(gama)
         yre = radius_external * np.sin(gama)
-
+    if print_info:
+        print("Gama:", gama, "\n")
+        print("Grooves", grooves, "\n")
+        print("Radius external, xre and yre: ", radius_external, xre, yre, "\n")
     return radius_external, xre, yre
 
 
