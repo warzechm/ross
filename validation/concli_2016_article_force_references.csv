@@ -1,0 +1,5 @@
+source,omega_rad_s,eccentricity_ratio,half_sommerfeld_force_N,schnerr_sauer_force_N,kunz_force_N,half_sommerfeld_angle_deg,schnerr_sauer_angle_deg,kunz_angle_deg
+Concli 2016 Table V / Fig. 6f approximate read,328.0,0.2,2378.0,3542.0,3498.0,97.0,96.0,97.0
+Concli 2016 Table V / Fig. 6f approximate read,328.0,0.4,4921.0,7041.0,9485.0,105.0,103.0,nan
+Concli 2016 Table V / Fig. 6f approximate read,328.0,0.6,8170.0,10658.0,14767.0,115.0,111.0,nan
+Concli 2016 Table V / Fig. 6f approximate read,328.0,0.8,14820.0,15128.0,14902.0,130.0,122.0,123.0
