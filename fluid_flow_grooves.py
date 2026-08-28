@@ -20,8 +20,10 @@
 
 from ross.bearings import fluid_flow
 import numpy as np
+from plotly import graph_objects as go
+from plotly.subplots import make_subplots
 from ross.bearings.fluid_flow_geometry import (external_radius_function, internal_radius_function)
-from ross.bearings.fluid_flow_graphics import plot_shape, plot_eccentricity, plot_pressure_surface, plot_pressure_theta
+from ross.bearings.fluid_flow_graphics import plot_shape, plot_eccentricity, plot_pressure_theta
 
 class FluidFlowGrooves(fluid_flow.FluidFlow):
     """ Calculate the pressure matrix for a journal bearing with grooves.
@@ -140,6 +142,99 @@ class FluidFlowGrooves(fluid_flow.FluidFlow):
                 self.re[i, j] = radius_external
                 self.ri[i, j] = radius_internal
 
+
+def plot_pressure_surfaces_comparison(
+    fluid_flow_objects,
+    subplot_titles=None,
+    horizontal_spacing=0.02,
+    **kwargs
+):
+    """Plot pressure surfaces in one figure using a common pressure scale."""
+    if subplot_titles is None:
+        subplot_titles = [f"Case {i + 1}" for i in range(len(fluid_flow_objects))]
+
+    pressure_matrices = []
+    for fluid_flow_object in fluid_flow_objects:
+        if not fluid_flow_object.numerical_pressure_matrix_available:
+            raise ValueError(
+                "Must calculate the numerical pressure matrix for every object. "
+                "Try calling calculate_pressure_matrix_numerical() first."
+            )
+        pressure_matrices.append(fluid_flow_object.p_mat_numerical.T)
+
+    pressure_min = min(np.amin(pressure_matrix) for pressure_matrix in pressure_matrices)
+    pressure_max = max(np.amax(pressure_matrix) for pressure_matrix in pressure_matrices)
+
+    fig = make_subplots(
+        rows=1,
+        cols=len(fluid_flow_objects),
+        specs=[[{"type": "surface"} for _ in fluid_flow_objects]],
+        subplot_titles=subplot_titles,
+        horizontal_spacing=horizontal_spacing,
+    )
+
+    for col, (fluid_flow_object, pressure_matrix) in enumerate(
+        zip(fluid_flow_objects, pressure_matrices), start=1
+    ):
+        z, theta = np.meshgrid(fluid_flow_object.z_list, fluid_flow_object.gama[0])
+        fig.add_trace(
+            go.Surface(
+                x=z,
+                y=theta,
+                z=pressure_matrix,
+                colorscale="Viridis",
+                cmin=pressure_min,
+                cmax=pressure_max,
+                colorbar=dict(title=dict(text="<b>Pressure</b>", side="top"), x=0.98),
+                showscale=col == len(fluid_flow_objects),
+                name=subplot_titles[col - 1],
+                showlegend=False,
+                hovertemplate=(
+                    "<b>Length: %{x:.2e}</b><br>"
+                    + "<b>Angular Position: %{y:.2f}</b><br>"
+                    + "<b>Pressure: %{z:.2f}</b>"
+                ),
+            ),
+            row=1,
+            col=col,
+        )
+
+    scene_common = dict(
+        bgcolor="white",
+        xaxis=dict(title=dict(text="<b>Rotor Length</b>")),
+        yaxis=dict(title=dict(text="<b>Angular Position</b>")),
+        zaxis=dict(title=dict(text="<b>Pressure</b>"), range=[pressure_min, pressure_max]),
+    )
+
+    fig.update_layout(
+        title=dict(text="<b>Bearing Pressure Field Comparison</b>"),
+        **{
+            f"scene{i if i > 1 else ''}": scene_common
+            for i in range(1, len(fluid_flow_objects) + 1)
+        },
+        margin=dict(l=10, r=40, t=70, b=10),
+        **kwargs,
+    )
+
+    return fig
+
+
+def export_figure_for_latex(fig, filename_stem):
+    """Export a Plotly figure to formats that can be included in LaTeX."""
+    for extension in ("pdf", "svg"):
+        filename = f"{filename_stem}.{extension}"
+        try:
+            fig.write_image(filename)
+            print(f"Saved {filename}")
+        except ValueError as error:
+            print(
+                f"Could not save {filename}. Static Plotly export requires kaleido: "
+                "pip install -U kaleido"
+            )
+            print(error)
+            break
+
+
 if __name__ == "__main__":
     # journal bearing
     d = 0.02
@@ -149,7 +244,7 @@ if __name__ == "__main__":
     nz = 16
     ntheta = 519            # MUST be odd
     length_brg = 0.08
-    p_in = 4954  # Pa (rho * g * h) h = 0.505 m
+    p_in = 0.0   # Pa (rho * g * h) h = 0.505 m, old value 4954
     p_out = 0.0
     visc = 0.89e-3*10
     rho = 997.0
@@ -158,24 +253,44 @@ if __name__ == "__main__":
     omega = rpm * 2*np.pi/60  # [rad/s]
     grooves = ((351.4, 8.6), (36.4, 53.6), (81.4, 98.6), (126.4, 143.6),
                (171.4, 188.6), (216.4, 233.6), (261.4, 278.6), (306.4, 323.6))
-    fluid_film = FluidFlowGrooves(nz=nz,
-                                  ntheta=ntheta,
-                                  length=length_brg,
-                                  omega=omega,
-                                  p_in=p_in,
-                                  p_out=p_out,
-                                  grooves=grooves,
-                                  groove_depth=5,
-                                  shape_geometry="grooves",
-                                  radius_rotor=radius_shaft,
-                                  radius_stator=radius_journal_bearing,
-                                  viscosity=visc,
-                                  density=rho,
-                                  load=load)
-    fluid_film.calculate_pressure_matrix_numerical()
-    fig = plot_eccentricity(fluid_film)
-    fig.show()
-    fig = plot_pressure_theta(fluid_film,z=7)
-    fig.show()
-    fig = plot_pressure_surface(fluid_film)
+    fluid_film_grooves = FluidFlowGrooves(nz=nz,
+                                          ntheta=ntheta,
+                                          length=length_brg,
+                                          omega=omega,
+                                          p_in=p_in,
+                                          p_out=p_out,
+                                          grooves=grooves,
+                                          groove_depth=5,
+                                          shape_geometry="grooves",
+                                          radius_rotor=radius_shaft,
+                                          radius_stator=radius_journal_bearing,
+                                          viscosity=visc,
+                                          density=rho,
+                                          load=load)
+    fluid_film_grooves.calculate_pressure_matrix_numerical()
+
+    fluid_film_plain = fluid_flow.FluidFlow(nz=nz,
+                                            ntheta=ntheta,
+                                            length=length_brg,
+                                            omega=omega,
+                                            p_in=p_in,
+                                            p_out=p_out,
+                                            radius_rotor=radius_shaft,
+                                            radius_stator=radius_journal_bearing,
+                                            viscosity=visc,
+                                            density=rho,
+                                            load=load)
+    fluid_film_plain.calculate_pressure_matrix_numerical()
+    #fig = plot_eccentricity(fluid_film_plain)
+    #fig.show()
+    #fig = plot_pressure_theta(fluid_film_plain, z=7)
+    #fig.show()
+    fig = plot_pressure_surfaces_comparison(
+        [fluid_film_grooves, fluid_film_plain],
+        subplot_titles=["With grooves", "Without grooves"],
+        horizontal_spacing=0.02,
+        width=1200,
+        height=700,
+    )
+    export_figure_for_latex(fig, "pressure_surfaces_comparison")
     fig.show()

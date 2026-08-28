@@ -178,7 +178,8 @@ def external_radius_function(
     elif shape == "grooves":
         if grooves is None:
             raise ValueError("Grooves positions are not defined.")
-        print("Adding grooves to geometry")
+        if print_info:
+            print("Adding grooves to geometry")
         angle_inside_groove = False
         for (i, j) in grooves:
             if i <= j:
