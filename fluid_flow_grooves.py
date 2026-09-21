@@ -68,9 +68,11 @@ class FluidFlowGrooves(fluid_flow.FluidFlow):
                  shape_geometry="cylindrical",
                  preload=0.4,
                  displacement=0,
-                 max_depth=None):
+                 max_depth=None,
+                 groove_rotation=0):
         self.grooves = grooves
         self.groove_depth = groove_depth
+        self.groove_rotation = groove_rotation
         super().__init__(nz,
                          ntheta,
                          length,
@@ -92,7 +94,7 @@ class FluidFlowGrooves(fluid_flow.FluidFlow):
                          displacement,
                          max_depth)
         
-    def rotate_grooves(self, angle):
+    def rotated_grooves(self, angle):
         """Rotate the groove positions by a given angle. Operates on grooves stored in class.
 
         Parameters
@@ -123,7 +125,7 @@ class FluidFlowGrooves(fluid_flow.FluidFlow):
             start = (np.pi / 2) + self.attitude_angle
         else:
             start = 0
-        grooves = self.rotate_grooves(0)
+        grooves = self.rotated_grooves(self.groove_rotation)
 
         for i in range(0, self.nz):
             zno = i * self.dz
