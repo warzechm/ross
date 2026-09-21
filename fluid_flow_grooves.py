@@ -20,9 +20,15 @@
 
 from ross.bearings import fluid_flow
 import numpy as np
+from scipy.optimize import least_squares
 from plotly import graph_objects as go
 from plotly.subplots import make_subplots
-from ross.bearings.fluid_flow_geometry import (external_radius_function, internal_radius_function)
+from ross.bearings.fluid_flow_coefficients import calculate_oil_film_force
+from ross.bearings.fluid_flow_geometry import (
+    external_radius_function,
+    internal_radius_function,
+    move_rotor_center_abs,
+)
 from ross.bearings.fluid_flow_graphics import plot_shape, plot_eccentricity, plot_pressure_theta
 
 class FluidFlowGrooves(fluid_flow.FluidFlow):
@@ -73,26 +79,37 @@ class FluidFlowGrooves(fluid_flow.FluidFlow):
         self.grooves = grooves
         self.groove_depth = groove_depth
         self.groove_rotation = groove_rotation
-        super().__init__(nz,
-                         ntheta,
-                         length,
-                         omega,
-                         p_in,
-                         p_out,
-                         radius_rotor,
-                         radius_stator,
-                         viscosity,
-                         density,
-                         attitude_angle,
-                         eccentricity,
-                         load,
-                         omegap,
-                         immediately_calculate_pressure_matrix_numerically,
-                         bearing_type,
-                         shape_geometry,
-                         preload,
-                         displacement,
-                         max_depth)
+        requested_load = load
+
+        if requested_load is not None:
+            if eccentricity is None:
+                eccentricity = 0.5 * (radius_stator - radius_rotor)
+            if attitude_angle is None:
+                attitude_angle = np.pi / 4
+
+        super().__init__(
+            nz=nz,
+            ntheta=ntheta,
+            length=length,
+            omega=omega,
+            p_in=p_in,
+            p_out=p_out,
+            radius_rotor=radius_rotor,
+            radius_stator=radius_stator,
+            viscosity=viscosity,
+            density=density,
+            attitude_angle=attitude_angle,
+            eccentricity=eccentricity,
+            load=None,
+            omegap=omegap,
+            immediately_calculate_pressure_matrix_numerically=False,
+            bearing_type=bearing_type,
+            shape_geometry=shape_geometry,
+            preload=preload,
+            displacement=displacement,
+            max_depth=max_depth,
+        )
+        self.load = requested_load
         
     def rotated_grooves(self, angle):
         """Rotate the groove positions by a given angle. Operates on grooves stored in class.
@@ -143,6 +160,87 @@ class FluidFlowGrooves(fluid_flow.FluidFlow):
                                              self.eccentricity)
                 self.re[i, j] = radius_external
                 self.ri[i, j] = radius_internal
+
+def find_equilibrium_position_grooved(
+    bearing,
+    initial_guess=None,
+    residual_tolerance=1e-3,
+    print_result=False,
+):
+    """Find the equilibrium position of a grooved journal bearing."""
+    if bearing.load is None:
+        raise ValueError("Load must be given to calculate the equilibrium position.")
+
+    clearance = bearing.radial_clearance
+
+    def set_position(position):
+        eccentricity_ratio, attitude_angle = position
+        x = clearance * eccentricity_ratio * np.sin(attitude_angle)
+        y = -clearance * eccentricity_ratio * np.cos(attitude_angle)
+        move_rotor_center_abs(bearing, x, y)
+        bearing.geometry_description()
+
+    def residuals(position):
+        set_position(position)
+        bearing.calculate_pressure_matrix_numerical()
+        _, _, force_x, force_y = calculate_oil_film_force(
+            bearing, force_type="numerical"
+        )
+        return np.array(
+            [
+                force_x / bearing.load,
+                (force_y - bearing.load) / bearing.load,
+            ]
+        )
+
+    if initial_guess is None:
+        candidates = []
+        eccentricity_ratios = np.linspace(0.2, 0.995, 9)
+        attitude_angles = np.linspace(0.0, np.pi / 2, 13)
+
+        for eccentricity_ratio in eccentricity_ratios:
+            for attitude_angle in attitude_angles:
+                position = np.array([eccentricity_ratio, attitude_angle])
+                score = np.linalg.norm(residuals(position))
+                candidates.append((score, position))
+
+        candidates.sort(key=lambda candidate: candidate[0])
+        starting_points = [position for _, position in candidates[:4]]
+    else:
+        starting_points = [np.asarray(initial_guess, dtype=float)]
+
+    results = []
+    for starting_point in starting_points:
+        result = least_squares(
+            residuals,
+            x0=starting_point,
+            jac="3-point",
+            diff_step=1e-3,
+            bounds=([1e-6, 0.0], [0.999, np.pi / 2]),
+            max_nfev=100,
+        )
+        results.append(result)
+
+    result = min(results, key=lambda candidate: np.linalg.norm(candidate.fun))
+    final_residual = residuals(result.x)
+    residual_norm = np.linalg.norm(final_residual)
+
+    if print_result:
+        print("Equilibrium solver:", result.message)
+        print("Solver variables (e/c, angle):", result.x)
+        print("Relative force residual:", final_residual)
+        print("Residual norm:", residual_norm)
+        print("The equilibrium position (x0, y0) is:", (bearing.xi, bearing.yi))
+
+    if residual_norm > residual_tolerance:
+        raise RuntimeError(
+            "The grooved-bearing equilibrium solver did not converge: "
+            f"{result.message}; relative residual={final_residual}; "
+            f"variables={result.x}"
+        )
+
+    return result
+
 
 
 def plot_pressure_surfaces_comparison(

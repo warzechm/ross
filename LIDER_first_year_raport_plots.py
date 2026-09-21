@@ -11,7 +11,10 @@ import matplotlib.pyplot as plt
 import plotly.io as pio
 import ross as rs
 from ross.bearings import fluid_flow as flow
-from fluid_flow_grooves import FluidFlowGrooves
+from fluid_flow_grooves import (
+    FluidFlowGrooves,
+    find_equilibrium_position_grooved,
+)
 from ross.bearings.fluid_flow_coefficients import calculate_stiffness_and_damping_coefficients
 from ross.bearings.fluid_flow_coefficients import find_equilibrium_position
 from ross.bearings.fluid_flow_geometry import (calculate_attitude_angle,
@@ -29,10 +32,10 @@ pio.renderers.default = "browser"  # or "notebook" in Jupyter
 d = 0.02  # shaft diameter
 # JOURNAL BEARING CONSTANTS
 radius_shaft = d/2
-radial_clearance = 0.0001/2
+radial_clearance = 0.000035  #0.0001/2
 radius_journal_bearing = radius_shaft + radial_clearance  # 0.1 mm clearance
-nz = 20
-ntheta = 129            # MUST be odd
+nz = 40
+ntheta = 257            # MUST be odd 129
 length_brg = 0.08
 p_in = 0.0  # Pa 4954.0 (rho * g * h) h = 0.505 m (tested but seemed not to work well with model)
 p_out = 0.0
@@ -41,7 +44,7 @@ node_journal_bearing = 44
 
 # element of coupling (disk)
 node_disk = 54
-m_D = 1.0  # kg, coupling (disk) mass, will be changed to ensure proper loading of journal bearing
+m_D = 0.8  # kg, coupling (disk) mass, will be changed to ensure proper loading of journal bearing
 r_D = 0.047 # m, assumed average radius of coupling to model it as disk
 rho_D = 7200  # kg/m^3, density of cast iron, material used for coupling
 b_D = m_D / (np.pi * r_D**2 * rho_D)  # width of the disk calculated to fit the mass
@@ -152,7 +155,15 @@ def create_plain_fluid_flow_journal(viscosity : float, rotation_speed : float, p
     return journal_bearing
 
 
-def create_grooved_fluid_flow_journal(viscosity : float, rotation_speed : float, grooves : tuple, groove_depth : float,  angle : float, print_matrix : bool):
+def create_grooved_fluid_flow_journal(
+    viscosity : float,
+    rotation_speed : float,
+    grooves : tuple,
+    groove_depth : float,
+    angle : float,
+    print_matrix : bool,
+    equilibrium_guess=None,
+):
     fluid_film_grooves = FluidFlowGrooves(nz=nz,
                                           ntheta=ntheta,
                                           length=length_brg,
@@ -168,7 +179,11 @@ def create_grooved_fluid_flow_journal(viscosity : float, rotation_speed : float,
                                           density=rho,
                                           load=journal_bearing_load,
                                           groove_rotation=angle)
-    equilibrium_position = find_equilibrium_position(fluid_film_grooves, True)
+    equilibrium_result = find_equilibrium_position_grooved(
+        fluid_film_grooves,
+        initial_guess=equilibrium_guess,
+        print_result=True,
+    )
     K_journal_bearing, C_journal_bearing = calculate_stiffness_and_damping_coefficients(fluid_film_grooves)
     if print_matrix:
         print(K_journal_bearing)
@@ -186,7 +201,7 @@ def create_grooved_fluid_flow_journal(viscosity : float, rotation_speed : float,
                                         cyx=C_journal_bearing[2],
                                         cyy=C_journal_bearing[3],
                                         tag="journal bearing")
-    return journal_bearing
+    return journal_bearing, equilibrium_result.x
 
 
 def calculate_amplitudes_over_velocity_range_for_plain_bearing():
@@ -208,10 +223,38 @@ def calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves : tuple
     visc = 0.89e-3
     rpm_range = np.arange(600, 4010, 10)
     amplitudes = np.zeros((rpm_range.size, 3))
+    equilibrium_guess = None
+    first_converged_speed = None
     for i, j in enumerate(rpm_range):
         print("Working on rotation speed: ", j)
         rotation_speed = j * 2*np.pi/60  # [rad/s]
-        journal_bearing = create_grooved_fluid_flow_journal(visc, rotation_speed, grooves, groove_depth, 6*np.pi/180, False)
+        try:
+            journal_bearing, equilibrium_guess = create_grooved_fluid_flow_journal(
+                visc,
+                rotation_speed,
+                grooves,
+                groove_depth,
+                0*np.pi/180,
+                False,
+                equilibrium_guess,
+            )
+        except RuntimeError as error:
+            print(f"No equilibrium found at {j} rpm: {error}")
+            amplitudes[i, 0] = j
+            amplitudes[i, 1:] = np.nan
+            equilibrium_guess = None
+            np.savetxt(
+                "amplitudes_grooved_bearing_0_deg.txt",
+                amplitudes,
+                header="rpm,amplitude_x,amplitude_y",
+                delimiter=",",
+            )
+            continue
+
+        if first_converged_speed is None:
+            first_converged_speed = j
+            print(f"First converged equilibrium found at {j} rpm.")
+
         (A_x, A_y) = detremine_vib_amp_at_journal_bearing(journal_bearing, coupling, rotation_speed)
         amplitudes[i, 0] = j
         amplitudes[i, 1] = A_x 
@@ -222,8 +265,8 @@ def calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves : tuple
 grooves = ((351.4, 8.6), (36.4, 53.6), (81.4, 98.6), (126.4, 143.6),
            (171.4, 188.6), (216.4, 233.6), (261.4, 278.6), (306.4, 323.6))
 
-calculate_amplitudes_over_velocity_range_for_plain_bearing()
-#calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.005)
+#calculate_amplitudes_over_velocity_range_for_plain_bearing()
+calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018)  # groove depth is fake, to get 0 Pa inside groove, but make variation of h^3 values in matrix smaller
 #journal_bearing = create_plain_fluid_flow_journal(0.89, 1200*2*np.pi/60, False)
 #(A_x, A_y) = detremine_vib_amp_at_journal_bearing(journal_bearing, coupling, 1200*2*np.pi/60)
 amp_plain = np.loadtxt("amplitudes_plain_bearing.txt", delimiter=",", skiprows=1)
