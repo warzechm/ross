@@ -206,7 +206,7 @@ def create_grooved_fluid_flow_journal(
 
 def calculate_amplitudes_over_velocity_range_for_plain_bearing():
     visc = 0.89e-3
-    rpm_range = np.arange(600, 4010, 10)
+    rpm_range = np.arange(600, 4000, 50)
     amplitudes = np.zeros((rpm_range.size, 3))
     for i, j in enumerate(rpm_range):
         print("Working on rotation speed: ", j)
@@ -219,9 +219,9 @@ def calculate_amplitudes_over_velocity_range_for_plain_bearing():
         np.savetxt("amplitudes_plain_bearing_test.txt", amplitudes, header="rpm,amplitude_x,amplitude_y", delimiter=",")
 
 
-def calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves : tuple, groove_depth : float):
+def calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves : tuple, groove_depth : float, groove_angle : float, file_name : str):
     visc = 0.89e-3
-    rpm_range = np.arange(600, 4010, 10)
+    rpm_range = np.arange(600, 4000, 50)
     amplitudes = np.zeros((rpm_range.size, 3))
     equilibrium_guess = None
     first_converged_speed = None
@@ -234,7 +234,7 @@ def calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves : tuple
                 rotation_speed,
                 grooves,
                 groove_depth,
-                0*np.pi/180,
+                groove_angle*np.pi/180,
                 False,
                 equilibrium_guess,
             )
@@ -244,7 +244,7 @@ def calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves : tuple
             amplitudes[i, 1:] = np.nan
             equilibrium_guess = None
             np.savetxt(
-                "amplitudes_grooved_bearing_0_deg.txt",
+                file_name,
                 amplitudes,
                 header="rpm,amplitude_x,amplitude_y",
                 delimiter=",",
@@ -259,14 +259,16 @@ def calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves : tuple
         amplitudes[i, 0] = j
         amplitudes[i, 1] = A_x 
         amplitudes[i, 2] = A_y
-        np.savetxt("amplitudes_grooved_bearing_6_deg.txt", amplitudes, header="rpm,amplitude_x,amplitude_y", delimiter=",")
+        np.savetxt(file_name, amplitudes, header="rpm,amplitude_x,amplitude_y", delimiter=",")
 
 
 grooves = ((351.4, 8.6), (36.4, 53.6), (81.4, 98.6), (126.4, 143.6),
            (171.4, 188.6), (216.4, 233.6), (261.4, 278.6), (306.4, 323.6))
 
-#calculate_amplitudes_over_velocity_range_for_plain_bearing()
-calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018)  # groove depth is fake, to get 0 Pa inside groove, but make variation of h^3 values in matrix smaller
+calculate_amplitudes_over_velocity_range_for_plain_bearing()
+ # groove depth is fake, to get 0 Pa inside groove, but make variation of h^3 values in matrix smaller
+calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 0, "amplitudes_grooved_bearing_0_deg.txt")
+calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 6, "amplitudes_grooved_bearing_6_deg.txt")
 #journal_bearing = create_plain_fluid_flow_journal(0.89, 1200*2*np.pi/60, False)
 #(A_x, A_y) = detremine_vib_amp_at_journal_bearing(journal_bearing, coupling, 1200*2*np.pi/60)
 amp_plain = np.loadtxt("amplitudes_plain_bearing.txt", delimiter=",", skiprows=1)
