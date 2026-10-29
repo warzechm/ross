@@ -62,6 +62,12 @@ F_w = 24.724449  # shaft weight divided by 10 to get the journal working
 journal_bearing_load = (F_D * (1.022 - 0.038) + F_w * (1.022/2 - 0.038)) / (0.833 - 0.038)
 print("Calculated journal bearing load in [N]: ", journal_bearing_load)
 
+water_viscosity = {"5 deg C." : 1.518e-3,
+                   "10 deg C." : 1.307e-3,
+                   "15 deg C." : 1.14e-3,
+                   "20 deg C." : 1.004e-3,
+                   "25 deg C." : 0.895e-3}
+
 
 def detremine_vib_amp_at_journal_bearing(journal_bearing : rs.BearingElement, coupling : rs.DiskElement, rotation_speed : float):
     steel = rs.materials.steel  # definition of material
@@ -219,8 +225,7 @@ def calculate_amplitudes_over_velocity_range_for_plain_bearing():
         np.savetxt("amplitudes_plain_bearing_test.txt", amplitudes, header="rpm,amplitude_x,amplitude_y", delimiter=",")
 
 
-def calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves : tuple, groove_depth : float, groove_angle : float, file_name : str):
-    visc = 0.89e-3
+def calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves : tuple, groove_depth : float, groove_angle : float, file_name : str, visc : float):
     rpm_range = np.arange(600, 4000, 50)
     amplitudes = np.zeros((rpm_range.size, 3))
     equilibrium_guess = None
@@ -265,10 +270,25 @@ def calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves : tuple
 grooves = ((351.4, 8.6), (36.4, 53.6), (81.4, 98.6), (126.4, 143.6),
            (171.4, 188.6), (216.4, 233.6), (261.4, 278.6), (306.4, 323.6))
 
-calculate_amplitudes_over_velocity_range_for_plain_bearing()
+#calculate_amplitudes_over_velocity_range_for_plain_bearing()
  # groove depth is fake, to get 0 Pa inside groove, but make variation of h^3 values in matrix smaller
-calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 0, "amplitudes_grooved_bearing_0_deg.txt")
-calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 6, "amplitudes_grooved_bearing_6_deg.txt")
+#calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 12, "amplitudes_grooved_bearing_12_deg.txt")
+#calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 18, "amplitudes_grooved_bearing_18_deg.txt")
+#calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 24, "amplitudes_grooved_bearing_24_deg.txt")
+#calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 30, "amplitudes_grooved_bearing_30_deg.txt")
+#calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 36, "amplitudes_grooved_bearing_36_deg.txt")
+#calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 42, "amplitudes_grooved_bearing_42_deg.txt")
+calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 0, "amplitudes_grooved_bearing_0_deg_5_Celcius.txt", water_viscosity["5 deg C."])
+calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 0, "amplitudes_grooved_bearing_0_deg_10_Celcius.txt", water_viscosity["10 deg C."])
+calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 0, "amplitudes_grooved_bearing_0_deg_15_Celcius.txt", water_viscosity["15 deg C."])
+calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 0, "amplitudes_grooved_bearing_0_deg_20_Celcius.txt", water_viscosity["20 deg C."])
+calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 0, "amplitudes_grooved_bearing_0_deg_25_Celcius.txt", water_viscosity["25 deg C."])
+calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 24, "amplitudes_grooved_bearing_24_deg_5_Celcius.txt", water_viscosity["5 deg C."])
+calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 24, "amplitudes_grooved_bearing_24_deg_10_Celcius.txt", water_viscosity["10 deg C."])
+calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 24, "amplitudes_grooved_bearing_24_deg_15_Celcius.txt", water_viscosity["15 deg C."])
+calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 24, "amplitudes_grooved_bearing_24_deg_20_Celcius.txt", water_viscosity["20 deg C."])
+calculate_amplitudes_over_velocity_range_for_grooved_bearing(grooves, 0.00018, 24, "amplitudes_grooved_bearing_24_deg_25_Celcius.txt", water_viscosity["25 deg C."])
+
 #journal_bearing = create_plain_fluid_flow_journal(0.89, 1200*2*np.pi/60, False)
 #(A_x, A_y) = detremine_vib_amp_at_journal_bearing(journal_bearing, coupling, 1200*2*np.pi/60)
 amp_plain = np.loadtxt("amplitudes_plain_bearing.txt", delimiter=",", skiprows=1)
