@@ -846,6 +846,70 @@ def rhs3(t : float, x : np.array) -> np.array:
     return np.array([x0_dot, x1_dot, x2_dot, x3_dot])
 
 
+def rhs4(t : float, x : np.array) -> np.array:
+    """ Function defines system of differential equations to be solved by ODE integrator.
+    Updated version for full text article (Tribology International). Mostly changed wrong radius.
+    Updated grid size (after convergence analysis).
+    Fine tuning of unbalance may be also needed.
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+
+    Notes
+    -----
+
+    Examples
+    --------
+    To be added if neccessary
+    """
+    global initialized_stiffness_and_damping
+    global K, C
+    load = 77  # this parameter may cause problems, as it is included in motion equation, was 77
+    m = 2.47 + 1.7  # [kg], D = 0.02 m, length = 1 m, ro = 7850 kg/m^3
+    omega = 30 * 2 * math.pi   # 20 Hz
+    e_u = 3.34e-5  # mass eccentricity in meters (G6.3 at 1800 rpm)
+    if not initialized_stiffness_and_damping:
+        radius_rotor = 0.01995
+        radius_stator = 0.02
+        grooves = ((351.4, 8.6), (36.4, 53.6), (81.4, 98.6), (126.4, 143.6),
+                   (171.4, 188.6), (216.4, 233.6), (261.4, 278.6), (306.4, 323.6))
+        grooves = rotate_grooves(grooves, 0)
+        nz = 18
+        ntheta = 271
+        length = 0.08
+        p_in = 0.0
+        p_out = 0.0
+        visc = 0.89e-3
+        rho = 997.0
+        my_fluid_flow = flow.FluidFlow(
+            nz,
+            ntheta,
+            length,
+            omega,
+            p_in,
+            p_out,
+            radius_rotor,
+            radius_stator,
+            visc,
+            rho,
+            load=load)
+        find_equilibrium_position_with_grooves(my_fluid_flow, grooves, True)
+        K, C = calculate_stiffness_and_damping_coefficients_for_flow_with_grooves(grooves, my_fluid_flow)
+        #find_equilibrium_position(my_fluid_flow, True)
+        #K, C = calculate_stiffness_and_damping_coefficients(my_fluid_flow)
+        initialized_stiffness_and_damping = True
+    e = math.sqrt(x[0]**2 + x[2]**2)  #  eccentricity from equilibrium point
+    last_eccentricity = e
+    x0_dot = x[1]
+    x1_dot = (-x[0]*K[0] - x[2]*K[1] - x[1]*C[0] - x[3]*C[1]) / m + 4*e_u * omega**2 * math.cos(omega * t)
+    x2_dot = x[3]
+    x3_dot = (-x[0]*K[2] - x[2]*K[3] - x[1]*C[2] - x[3]*C[3]) / m + 4*e_u * omega**2 * math.sin(omega * t)
+    return np.array([x0_dot, x1_dot, x2_dot, x3_dot])
+
+
 
 def solve_ODE(func : callable, init_cond : np.array,
               time_steps : np.array, problem_size : int)  -> np.array:
@@ -966,6 +1030,74 @@ def check_equilibrium_point():
     print(f"Damping: c_xx = {C[0]}, c_xy = {C[1]}, c_yx = {C[2]}, c_yy = {C[3]}")
 
 
+def check_equilibrium_point_updated():
+    """ During submission of the article describing model of the journal bearing created during the
+    first year of the LIDER project I realised, that the simulated journal bearing had wrong diameter:
+    50 mm instead of 20 mm. I decided to regenerate the data with correct value. Because of that I
+    copied the function check_equilibrium_point() and renamed it to check_equilibrium_point_updated().
+
+    Parameters
+    ----------
+    None
+        Function does not take any parameters. It has all values defined inside.
+
+    Returns
+    -------
+    None
+        Only equilibrium position will be printed (coordinates, eccentricity and attitude angle)
+    
+    Notes
+    -----
+    To be added.
+    
+    Examples
+    --------
+    To be added if necessary.
+    """
+    load = 77
+    radius_rotor = 0.01995
+    radius_stator = 0.02
+    omega = 30 * 2 * math.pi   # 20 Hz
+    grooves = ((351.4, 8.6), (36.4, 53.6), (81.4, 98.6), (126.4, 143.6),
+               (171.4, 188.6), (216.4, 233.6), (261.4, 278.6), (306.4, 323.6))
+    grooves = rotate_grooves(grooves, 42)
+    nz = 18
+    ntheta = 271
+    length = 0.08
+    p_in = 0.0
+    p_out = 0.0
+    visc = 0.89e-3
+    rho = 997.0
+    my_fluid_flow = flow.FluidFlow(
+        nz,
+        ntheta,
+        length,
+        omega,
+        p_in,
+        p_out,
+        radius_rotor,
+        radius_stator,
+        visc,
+        rho,
+        load=load)
+    print('Bearing parameter in equilibrium state:\n')
+    print(f'Coordinates of the shaft centre: [{my_fluid_flow.xi}, {my_fluid_flow.yi}]\n')
+    print(f'Eccentricity: {my_fluid_flow.eccentricity}, attitude angle: {my_fluid_flow.attitude_angle}\n')
+    radial_force, tangential_force, force_x, force_y = calculate_oil_film_force(my_fluid_flow)
+    print(f"Updated forces [{force_x}, {force_y}]\n")
+    K, C = calculate_stiffness_and_damping_coefficients(my_fluid_flow)
+    print(f"Stiffness: k_xx = {K[0]}, k_xy = {K[1]}, k_yx = {K[2]}, k_yy = {K[3]}")
+    print(f"Damping: c_xx = {C[0]}, c_xy = {C[1]}, c_yx = {C[2]}, c_yy = {C[3]}")
+    print("Values calculated for bearing with grooves: ")
+    find_equilibrium_position_with_grooves(my_fluid_flow, grooves, True)
+    radial_force, tangential_force, force_x, force_y = calculate_oil_film_force(my_fluid_flow)
+    print(f'Eccentricity: {my_fluid_flow.eccentricity}, attitude angle: {my_fluid_flow.attitude_angle}\n')
+    print(f"Updated forces [{force_x}, {force_y}]\n")
+    K, C = calculate_stiffness_and_damping_coefficients_for_flow_with_grooves(grooves, my_fluid_flow)
+    print(f"Stiffness: k_xx = {K[0]}, k_xy = {K[1]}, k_yx = {K[2]}, k_yy = {K[3]}")
+    print(f"Damping: c_xx = {C[0]}, c_xy = {C[1]}, c_yx = {C[2]}, c_yy = {C[3]}")
+
+
 if __name__ == "__main__":
 #    hydrodynamic_journal_bearing_example_9()
     # pressure_distribution_plot()
@@ -973,16 +1105,17 @@ if __name__ == "__main__":
 #    test_pressure_in_grooves()
     init_cond = np.array([0, 0, 0, 0])
     time_discretisation = dt_force  #  [s]
-    simulation_time = 1  #  [s]
+    simulation_time = 0.1  #  [s]
     t = np.arange(time_discretisation, simulation_time, time_discretisation) 
-    results = solve_ODE(rhs3, init_cond, t, 4)
+    results = solve_ODE(rhs4, init_cond, t, 4)
     fig = mpt.figure()
     axes = mpt.subplot()
     axes.plot(results[:, 0], results[:, 2])
-    np.savetxt("results_30Hz_6deg_77N.txt", results)
+    np.savetxt("results_30Hz_0deg_77N.txt", results)
     mpt.show()
-    check_equilibrium_point()
-    grooves = ((351.4, 8.6), (36.4, 53.6), (81.4, 98.6), (126.4, 143.6),
-               (171.4, 188.6), (216.4, 233.6), (261.4, 278.6), (306.4, 323.6))
-    print(rotate_grooves(grooves, 6))
+#    check_equilibrium_point()
+#    grooves = ((351.4, 8.6), (36.4, 53.6), (81.4, 98.6), (126.4, 143.6),
+#               (171.4, 188.6), (216.4, 233.6), (261.4, 278.6), (306.4, 323.6))
+#    print(rotate_grooves(grooves, 6))
+#    check_equilibrium_point_updated()
     
